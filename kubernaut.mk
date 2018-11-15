@@ -1,4 +1,25 @@
-## Quickstart (and pretty much everything else you need to know)
+# Copyright 2018 Datawire. All rights reserved.
+
+# Makefile snippet to manage kubernaut.io clusters using Gubernaut.
+#
+### Reference:
+#
+# Inputs:
+#   - Variable: GUBERNAUT ?= gubernaut
+# Outputs:
+#   - Target       : `%.knaut`
+#   - .PHONY Target: `%.knaut.clean`
+#
+# Creating the NAME.knaut creates the Kubernaut claim.  The file may
+# be used as a KUBECONFIG file.
+#
+# Calling the NAME.knaut.clean file releases the claim, and removes
+# the NAME.knaut file.
+#
+# The GUBERNAUT variable may be used to adjust the gubernaut command
+# called; by default it looks up 'gubernaut' in $PATH.
+#
+### Quickstart:
 #
 #  1. Put this file in your source tree and include it from your
 #     Makefile, e.g.:
@@ -6,6 +27,10 @@
 #     ...
 #     include kubernaut.mk
 #     ...
+#
+#     Set the GUBERNAUT variable before including it, if you would
+#     like to use a different path than looking up 'gubernaut' in
+#     $PATH.
 #
 #  2. Run `make foo.knaut` to (re)acquire a cluster.
 #
@@ -23,43 +48,27 @@
 #             KUBECONFIG=test-cluster.knaut py.test ...
 #
 #     clean: test-cluster.knaut.clean
-#
-#  7. Use the kubernaut.clobber target to delete the kubernaut binary
-#     itself:
-#
-#     clobber: kubernaut.clobber
-#
 
-.PRECIOUS: %.knaut.claim
-.SECONDARY: %.knaut.claim
+GUBERNAUT ?= gubernaut
 
-%.knaut.claim :
-	@if [ -z $${CI+x} ]; then \
-		echo $(@:%.knaut.claim=%)-$${USER} > $@; \
-	else \
-		echo $(@:%.knaut.claim=%)-$${USER}-$(shell uuidgen) > $@; \
-	fi
+# Only add a dependency on the the gubernaut binary if GUBERNAUT is
+# set to a path; don't add the dependency if we'll be finding it via
+# ${PATH}.
+_GUBERNAUT_DEP = $(if $(findstring /,$(GUBERNAUT)),$(GUBERNAUT))
 
-KUBERNAUT=./gubernaut
-KUBERNAUT_CLAIM_FILE=$(@:%.knaut=%.knaut.claim)
-KUBERNAUT_CLAIM_NAME=$(shell cat $(KUBERNAUT_CLAIM_FILE))
+%.knaut.claim:
+	echo $(subst /,_,$*)-$${USER}-$$(uuidgen) > $@
 
-%.knaut : %.knaut.claim $(KUBERNAUT)
-	$(KUBERNAUT) -release $(KUBERNAUT_CLAIM_NAME)
-	$(KUBERNAUT) -claim $(KUBERNAUT_CLAIM_NAME) -output $@
+%.knaut: %.knaut.claim $(_GUBERNAUT_DEP)
+	$(GUBERNAUT) -release "$$(cat $<)"
+	$(GUBERNAUT) -claim "$$(cat $<)" -output $@ >/dev/null
 
+%.knaut.clean: $(_GUBERNAUT_DEP)
+	[ ! -e $*.knaut.claim ] || $(GUBERNAUT) -release "$$(cat $*.knaut.claim)"
+	rm -f -- $*.knaut $*.knaut.claim
 .PHONY: %.knaut.clean
 
-%.knaut.clean : $(KUBERNAUT)
-	if [ -e $(@:%.clean=%.claim) ]; then $(KUBERNAUT) -release $$(cat $(@:%.clean=%.claim)); fi
-	rm -f $(@:%.knaut.clean=%.knaut)
-	rm -f $(@:%.clean=%.claim)
-
-gubernaut: cmd/gubernaut/gubernaut.go
-	go build cmd/gubernaut/gubernaut.go
-
-.PHONY: kubernaut.clobber
-
-kubernaut.clobber:
-	rm -f gubernaut
-
+# We want sane .INTERMEDIATE file behavior, since .knaut and
+# .knaut.claim files are likely to be automatically considered
+# .INTERMEDIATE.
+include $(dir $(lastword $(MAKEFILE_LIST)))/common.mk

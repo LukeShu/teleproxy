@@ -1,4 +1,5 @@
 /teleproxy
 /kubewait
 /gubernaut
-cluster.knaut*
+*.knaut
+*.knaut.claim

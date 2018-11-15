@@ -1,6 +1,7 @@
 
 all: test build
 
+GUBERNAUT = ./gubernaut
 include kubernaut.mk
 
 export KUBECONFIG=${PWD}/cluster.knaut
@@ -27,6 +28,9 @@ get:
 .PHONY: kubewait
 kubewait: $(GO_FILES)
 	go build cmd/kubewait/kubewait.go
+
+gubernaut: cmd/gubernaut/gubernaut.go FORCE
+	go build cmd/gubernaut/gubernaut.go
 
 other-tests:
 	go test -v $(shell go list ./... \
@@ -62,6 +66,6 @@ run: build
 	./teleproxy
 
 clean: cluster.knaut.clean
-	rm -f ./teleproxy
+	rm -f ./teleproxy ./gubernaut
 
-clobber: clean kubernaut.clobber
+clobber: clean
