@@ -1,6 +1,7 @@
 # Copyright 2018 Datawire. All rights reserved.
 
-all: test build
+all: build check
+.PHONY: all
 
 GUBERNAUT = ./gubernaut
 include kubernaut.mk
@@ -13,12 +14,14 @@ pkgs = $(sort $(addprefix $(pkg)/,$(patsubst %/,%,$(dir $(shell git ls-files -- 
 
 GO = GOPATH=$(CURDIR)/.go-workspace GOBIN=$(CURDIR) go
 
-export KUBECONFIG=${PWD}/cluster.knaut
-export PATH:=${PATH}
+DOCKER_IMAGE = teleproxy-make
+DOCKER = $(if $(shell type docker 2>/dev/null),docker,true)
+
+export KUBECONFIG = $(CURDIR)/cluster.knaut
 
 # Build
 build: $(bins)
-	sudo chown root:wheel ./teleproxy && sudo chmod u+s ./teleproxy
+.PHONY: build
 
 # Having multiple `go install`s going at once can corrupt
 # `$(GOPATH)/pkg`.  Setting .NOTPARALLEL is simpler than mucking with
@@ -32,44 +35,47 @@ get:
 .PHONY: get
 
 # Clean
-clean: cluster.knaut.clean
-	rm -f $(bins)
-
-clobber: clean
+clean: $(addsuffix .clean,$(wildcard *.knaut))
+	rm -f -- $(bins)
+	rm -rf -- .go-workspace/pkg
+.PHONY: clean
 
 # Check
-test: test-go test-docker
-test-go: get run-tests
-run-tests: sudo-tests other-tests
-sudo-tests: nat-tests smoke-tests
+check: check-nat check-teleproxy check-other check-docker
+.PHONY: check
 
-.PHONY: manifests
-manifests: cluster.knaut kubewait
+test-cluster: $(KUBECONFIG) kubewait
 	kubectl apply -f k8s
 	./kubewait -f k8s
+.PHONY: test-cluster
 
-nat-tests:
-	$(GO) test -v -exec sudo github.com/datawire/teleproxy/internal/pkg/nat/
-smoke-tests: manifests
-	$(GO) test -v -exec "sudo env PATH=${PATH} KUBECONFIG=${KUBECONFIG}" github.com/datawire/teleproxy/cmd/teleproxy
-other-tests:
-	$(GO) test -v $(shell printf '%s\n' $(pkgs) \
-		| fgrep -v github.com/datawire/teleproxy/internal/pkg/nat \
-		| fgrep -v github.com/datawire/teleproxy/cmd/teleproxy)
-test-docker:
-	@if [[ "$(shell which docker)-no" != "-no" ]]; then \
-		docker build -f scripts/Dockerfile . -t teleproxy-make && \
-		docker run --cap-add=NET_ADMIN teleproxy-make nat-tests ; \
-	else \
-		echo "SKIPPING DOCKER TESTS" ; \
-	fi
+docker-image: build
+	$(DOCKER) build -f scripts/Dockerfile . -t $(DOCKER_IMAGE)
+.PHONY: docker-image
+
+check-nat:
+	$(GO) test -v -exec sudo $(pkg)/internal/pkg/nat
+check-teleproxy: test-cluster $(KUBECONFIG)
+	$(GO) test -v -exec "sudo env PATH=$$PATH KUBECONFIG=$$KUBECONFIG" $(pkg)/cmd/teleproxy
+check-other:
+	$(GO) test -v $(filter-out $(pkg)/internal/pkg/nat $(pkg)/cmd/teleproxy,$(pkgs))
+check-docker: docker-image
+	$(DOCKER) run --rm --cap-add=NET_ADMIN $(DOCKER_IMAGE) make check-nat.tap
+	$(DOCKER) image rm $(DOCKER_IMAGE)
+.PHONY: check-%
 
 # Misc
-shell: cluster.knaut
+shell: $(KUBECONFIG)
 	@exec env -u MAKELEVEL PS1="(dev) [\W]$$ " bash
+.PHONY: shell
 
 format:
 	gofmt -w -s $(dirs)
+.PHONY: format
 
 run: build
 	./teleproxy
+.PHONY: run
+
+GUBERNAUT = ./gubernaut
+include kubernaut.mk
