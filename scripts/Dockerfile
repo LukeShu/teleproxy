@@ -1,17 +1,10 @@
 FROM golang:1.10.1-alpine
 RUN apk --no-cache add make iptables sudo git
 
-RUN go get github.com/google/shlex \
-           github.com/miekg/dns \
-           golang.org/x/net/proxy \
-	   k8s.io/api/core/v1 \
-	   k8s.io/apimachinery/pkg/fields \
-	   k8s.io/client-go/kubernetes \
-	   k8s.io/client-go/plugin/pkg/client/auth \
-	   k8s.io/client-go/tools/clientcmd \
-           k8s.io/client-go/tools/cache
-
-WORKDIR /go/src/github.com/datawire/teleproxy
-
 COPY . .
+# This symlink was excluded from the context, because (some versions
+# of?) Docker get thrown in to an infinite loop by it.  So exclude it
+# and re-create it manually.
+RUN ln -sT ../../../.. .go-workspace/src/github.com/datawire/teleproxy
+
 ENTRYPOINT [ "make" ]

@@ -1,33 +1,39 @@
+# Copyright 2018 Datawire. All rights reserved.
 
 all: test build
 
 GUBERNAUT = ./gubernaut
 include kubernaut.mk
+include common.mk
+
+pkg = github.com/datawire/teleproxy
+bins = gubernaut kubewait teleproxy
+dirs = cmd internal pkg
+pkgs = $(sort $(addprefix $(pkg)/,$(patsubst %/,%,$(dir $(shell git ls-files -- $(dirs))))))
+
+GO = GOPATH=$(CURDIR)/.go-workspace GOBIN=$(CURDIR) go
 
 export KUBECONFIG=${PWD}/cluster.knaut
 export PATH:=${PATH}
 
 # Build
-build: teleproxy
+build: $(bins)
 	sudo chown root:wheel ./teleproxy && sudo chmod u+s ./teleproxy
 
-.PHONY: teleproxy
-teleproxy: $(GO_FILES)
-	go build cmd/teleproxy/teleproxy.go
-
-.PHONY: kubewait
-kubewait: $(GO_FILES)
-	go build cmd/kubewait/kubewait.go
-
-gubernaut: cmd/gubernaut/gubernaut.go FORCE
-	go build cmd/gubernaut/gubernaut.go
+# Having multiple `go install`s going at once can corrupt
+# `$(GOPATH)/pkg`.  Setting .NOTPARALLEL is simpler than mucking with
+# multi-target pattern rules.
+.NOTPARALLEL:
+$(bins): %: get FORCE
+	$(GO) install $(pkg)/cmd/$@
 
 get:
-	go get -t -d ./...
+	$(GO) get -t -d ./...
+.PHONY: get
 
 # Clean
 clean: cluster.knaut.clean
-	rm -f ./teleproxy ./gubernaut
+	rm -f $(bins)
 
 clobber: clean
 
@@ -43,11 +49,11 @@ manifests: cluster.knaut kubewait
 	./kubewait -f k8s
 
 nat-tests:
-	go test -v -exec sudo github.com/datawire/teleproxy/internal/pkg/nat/
+	$(GO) test -v -exec sudo github.com/datawire/teleproxy/internal/pkg/nat/
 smoke-tests: manifests
-	go test -v -exec "sudo env PATH=${PATH} KUBECONFIG=${KUBECONFIG}" github.com/datawire/teleproxy/cmd/teleproxy
+	$(GO) test -v -exec "sudo env PATH=${PATH} KUBECONFIG=${KUBECONFIG}" github.com/datawire/teleproxy/cmd/teleproxy
 other-tests:
-	go test -v $(shell go list ./... \
+	$(GO) test -v $(shell printf '%s\n' $(pkgs) \
 		| fgrep -v github.com/datawire/teleproxy/internal/pkg/nat \
 		| fgrep -v github.com/datawire/teleproxy/cmd/teleproxy)
 test-docker:
@@ -63,7 +69,7 @@ shell: cluster.knaut
 	@exec env -u MAKELEVEL PS1="(dev) [\W]$$ " bash
 
 format:
-	gofmt -w -s cmd internal pkg
+	gofmt -w -s $(dirs)
 
 run: build
 	./teleproxy
